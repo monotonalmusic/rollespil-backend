@@ -23,3 +23,8 @@ tmp/
 # VS Code settings
 .vscode/
 .DS_Store
+
+#uploads
+
+uploads/*
+!uploads/.gitkeep

@@ -90,7 +90,7 @@ app.post('/upload/', (req, res) => {
         // Create new item object
         const newItem = {
             id: Date.now(), // Unique ID
-            filePath: `/uploads/${req.file.filename}/`,
+            filePath: `/uploads/${req.file.filename}`,
             Navn,
             Race,
             Klasse,
@@ -182,7 +182,7 @@ app.put('/edit/', (req, res) => {
             }
 
             // Update to new file path
-            updatedFilePath = `/uploads/${req.file.filename}/`;
+            updatedFilePath = `/uploads/${req.file.filename}`;
         }
 
         // Update metadata

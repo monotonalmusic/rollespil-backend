@@ -2,38 +2,24 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const app = express();
 
-const metadataFilePath = './metadata.json'; // Path to store the metadata
+const app = express();
+const metadataFilePath = './metadata.json'; // Path to store metadata
+
 let uploadedItems = []; // Array to store uploaded items metadata
 
-// Set storage for Multer
-const storage = multer.diskStorage({
-    destination: './uploads/', // Folder to store the uploaded files
-    filename: (req, file, cb) => {
-        cb(null, file.fieldname + '-' + Date.now() + path.extname(file.originalname));
-    }
-});
-
-// Initialize Multer
-const upload = multer({
-    storage: storage,
-    limits: { fileSize: 10000000 } // 10MB file size limit
-}).single('image');
-
-// Middleware to parse form fields
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
-
-// Serve static files
-app.use(express.static('public'));
-
-// Function to save metadata to file
-function saveMetadataToFile() {
-    fs.writeFileSync(metadataFilePath, JSON.stringify(uploadedItems, null, 2), 'utf-8');
+// Ensure 'uploads' directory exists
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Load metadata from the file when the server starts
+// Ensure metadata file exists
+if (!fs.existsSync(metadataFilePath)) {
+    fs.writeFileSync(metadataFilePath, JSON.stringify([], null, 2), 'utf-8');
+}
+
+// Function to load metadata from the JSON file
 function loadExistingUploads() {
     if (fs.existsSync(metadataFilePath)) {
         const data = fs.readFileSync(metadataFilePath, 'utf-8');
@@ -41,14 +27,42 @@ function loadExistingUploads() {
     }
 }
 
-// Call the function to load existing uploads when the server starts
+// Load metadata when the server starts
 loadExistingUploads();
 
-// POST route to handle image and event data
+// Function to save metadata to the JSON file
+function saveMetadataToFile() {
+    fs.writeFileSync(metadataFilePath, JSON.stringify(uploadedItems, null, 2), 'utf-8');
+}
+
+// Set storage for Multer
+const storage = multer.diskStorage({
+    destination: uploadDir, // Store images in the uploads folder
+    filename: (req, file, cb) => {
+        cb(null, file.fieldname + '-' + Date.now() + path.extname(file.originalname));
+    }
+});
+
+// Initialize Multer for file uploads
+const upload = multer({
+    storage: storage,
+    limits: { fileSize: 10000000 } // 10MB file size limit
+}).single('image');
+
+// Middleware to parse JSON and URL-encoded form data
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+
+// Serve uploaded images as static files
+app.use('/uploads', express.static(uploadDir));
+
+/**
+ * POST: Upload image and text data
+ */
 app.post('/upload', (req, res) => {
     upload(req, res, (err) => {
         if (err) {
-            console.log('Upload Error:', err);
+            console.error('Upload Error:', err);
             return res.status(400).send('Error uploading file.');
         }
 
@@ -56,16 +70,17 @@ app.post('/upload', (req, res) => {
             return res.status(400).send('No file uploaded.');
         }
 
-        // Get additional form data (Navn, Race, Klasse, Styrker, Svageheder, Mere om..)
+        // Get form data
         const { Navn, Race, Klasse, Styrker, Svageheder, MereOm } = req.body;
 
-        // Check if the additional fields are received
+        // Validate input fields
         if (!Navn || !Race || !Klasse || !Styrker || !Svageheder || !MereOm) {
             return res.status(400).send('Missing required details.');
         }
 
-        // Save the uploaded data (in memory and metadata.json)
+        // Create new item object
         const newItem = {
+            id: Date.now(), // Unique ID
             filePath: `/uploads/${req.file.filename}`,
             Navn,
             Race,
@@ -75,41 +90,52 @@ app.post('/upload', (req, res) => {
             MereOm
         };
 
+        // Add new item to array and save metadata
         uploadedItems.push(newItem);
-        saveMetadataToFile(); // Save metadata after every upload
+        saveMetadataToFile();
 
-        // Respond with the file path and other form data
         res.json(newItem);
     });
 });
 
-// DELETE route to delete an uploaded item
-app.delete('/delete', (req, res) => {
-    const { filePath } = req.query;
+/**
+ * GET: Retrieve all uploaded metadata
+ */
+app.get('/uploads-data', (req, res) => {
+    res.json(uploadedItems);
+});
 
-    // Find the index of the item to delete
-    const index = uploadedItems.findIndex(item => item.filePath === filePath);
+/**
+ * DELETE: Delete an uploaded image and its metadata
+ */
+app.delete('/delete', (req, res) => {
+    const { id } = req.query; // Use ID for deletion
+
+    // Find the item index
+    const index = uploadedItems.findIndex(item => item.id == id);
     if (index === -1) {
         return res.status(404).send('Item not found.');
     }
 
     // Remove the file from the file system
-    const fileName = path.join(__dirname, filePath);
+    const fileName = path.join(__dirname, uploadedItems[index].filePath);
     fs.unlink(fileName, (err) => {
         if (err) {
             console.error('Error deleting file:', err);
             return res.status(500).send('Error deleting file.');
         }
 
-        // Remove the item from the uploadedItems array
+        // Remove item from metadata array and save
         uploadedItems.splice(index, 1);
-        saveMetadataToFile(); // Save updated metadata after deletion
+        saveMetadataToFile();
 
         res.sendStatus(200);
     });
 });
 
-// PUT route to edit existing uploads including image replacement
+/**
+ * PUT: Edit existing uploads, including image replacement
+ */
 app.put('/edit', (req, res) => {
     upload(req, res, (err) => {
         if (err) {
@@ -117,35 +143,33 @@ app.put('/edit', (req, res) => {
             return res.status(400).send('Error uploading file.');
         }
 
-        const { filePath, Navn, Race, Klasse, Styrker, Svageheder, MereOm } = req.body;
+        const { id, Navn, Race, Klasse, Styrker, Svageheder, MereOm } = req.body;
 
-        // Check if filePath is provided
-        if (!filePath) {
-            return res.status(400).send('filePath is required.');
-        }
-
-        // Find the index of the item to edit
-        const index = uploadedItems.findIndex(item => item.filePath === filePath);
+        // Find item index
+        const index = uploadedItems.findIndex(item => item.id == id);
         if (index === -1) {
             return res.status(404).send('Item not found.');
         }
 
-        // If there's a new file, update the image path
+        // Get existing file path
         let updatedFilePath = uploadedItems[index].filePath;
+
+        // If a new image is uploaded, replace the old one
         if (req.file) {
-            // Remove the old image file
-            const oldFileName = path.join(__dirname, uploadedItems[index].filePath);
-            fs.unlink(oldFileName, (unlinkErr) => {
+            // Remove old file
+            const oldFilePath = path.join(__dirname, uploadedItems[index].filePath);
+            fs.unlink(oldFilePath, (unlinkErr) => {
                 if (unlinkErr) console.error('Error deleting old file:', unlinkErr);
             });
 
-            // Update the filePath to the new uploaded file
+            // Update to new file path
             updatedFilePath = `/uploads/${req.file.filename}`;
         }
 
-        // Update the item's metadata
+        // Update metadata
         uploadedItems[index] = {
-            filePath: updatedFilePath,  // Update the file path if image was changed
+            id: parseInt(id), // Maintain ID
+            filePath: updatedFilePath,
             Navn,
             Race,
             Klasse,
@@ -154,26 +178,14 @@ app.put('/edit', (req, res) => {
             MereOm
         };
 
-        // Save the updated metadata to file
         saveMetadataToFile();
 
-        // Respond with the updated item
         res.json(uploadedItems[index]);
     });
 });
 
-
-// Serve the uploaded images
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
-// GET route to retrieve all uploaded items
-app.get('/uploads-data', (req, res) => {
-    res.json(uploadedItems);
-});
-
 // Start the server
 const PORT = 3001;
-
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });

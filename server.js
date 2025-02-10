@@ -54,12 +54,12 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
 // Serve uploaded images as static files
-app.use('/uploads', express.static(uploadDir));
+app.use('/uploads/', express.static(uploadDir));
 
 /**
  * POST: Upload image and text data
  */
-app.post('/upload', (req, res) => {
+app.post('/upload/', (req, res) => {
     upload(req, res, (err) => {
         if (err) {
             console.error('Upload Error:', err);
@@ -81,7 +81,7 @@ app.post('/upload', (req, res) => {
         // Create new item object
         const newItem = {
             id: Date.now(), // Unique ID
-            filePath: `/uploads/${req.file.filename}`,
+            filePath: `/uploads/${req.file.filename}/`,
             Navn,
             Race,
             Klasse,
@@ -101,14 +101,14 @@ app.post('/upload', (req, res) => {
 /**
  * GET: Retrieve all uploaded metadata
  */
-app.get('/uploads-data', (req, res) => {
+app.get('/uploads-data/', (req, res) => {
     res.json(uploadedItems);
 });
 
 /**
  * DELETE: Delete an uploaded image and its metadata
  */
-app.delete('/delete', (req, res) => {
+app.delete('/delete/', (req, res) => {
     const { id } = req.query; // Use ID for deletion
 
     // Find the item index
@@ -119,24 +119,32 @@ app.delete('/delete', (req, res) => {
 
     // Remove the file from the file system
     const fileName = path.join(__dirname, uploadedItems[index].filePath);
-    fs.unlink(fileName, (err) => {
-        if (err) {
-            console.error('Error deleting file:', err);
-            return res.status(500).send('Error deleting file.');
-        }
+    
+    if (fs.existsSync(fileName)) {
+        fs.unlink(fileName, (err) => {
+            if (err) {
+                console.error('Error deleting file:', err);
+                return res.status(500).send('Error deleting file.');
+            }
 
-        // Remove item from metadata array and save
+            // Remove item from metadata array and save
+            uploadedItems.splice(index, 1);
+            saveMetadataToFile();
+
+            res.sendStatus(200);
+        });
+    } else {
+        // If file doesn't exist, just remove metadata
         uploadedItems.splice(index, 1);
         saveMetadataToFile();
-
         res.sendStatus(200);
-    });
+    }
 });
 
 /**
  * PUT: Edit existing uploads, including image replacement
  */
-app.put('/edit', (req, res) => {
+app.put('/edit/', (req, res) => {
     upload(req, res, (err) => {
         if (err) {
             console.error('Upload Error:', err);
@@ -156,14 +164,16 @@ app.put('/edit', (req, res) => {
 
         // If a new image is uploaded, replace the old one
         if (req.file) {
-            // Remove old file
+            // Remove old file if it exists
             const oldFilePath = path.join(__dirname, uploadedItems[index].filePath);
-            fs.unlink(oldFilePath, (unlinkErr) => {
-                if (unlinkErr) console.error('Error deleting old file:', unlinkErr);
-            });
+            if (fs.existsSync(oldFilePath)) {
+                fs.unlink(oldFilePath, (unlinkErr) => {
+                    if (unlinkErr) console.error('Error deleting old file:', unlinkErr);
+                });
+            }
 
             // Update to new file path
-            updatedFilePath = `/uploads/${req.file.filename}`;
+            updatedFilePath = `/uploads/${req.file.filename}/`;
         }
 
         // Update metadata
@@ -189,3 +199,4 @@ const PORT = 3001;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
+
